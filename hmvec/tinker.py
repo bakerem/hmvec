@@ -50,7 +50,8 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     # if n = (rho/m) nu f(nu) dlnsigmainv/dm
     assert np.isclose(delta,200.), "delta!=200 note implemented yet." # FIXME: interpolate for any value of delta
     # FIXME: set z>3 to z=3
-    zs = zs*np.heaviside(3-zs,0)+3*np.heaviside(zs-3,0)
+    # zs = zs*np.heaviside(3-zs,0)+3*np.heaviside(zs-3,0)
+    zs = np.where(zs < 3, zs, 3)
     beta0 = 0.589
     gamma0 = 0.864
     phi0 = -0.729
@@ -61,19 +62,20 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     gamma = gamma0 * (1+zs)**(-0.01)
     unnormalized = (1. + (beta*nu)**(-2.*phi))*(nu**(2*eta))*np.exp(-gamma*nu**2./2.)
     if norm_consistency:
-        aroot = os.path.dirname(__file__)+"/../data/alpha_consistency.txt"
+        aroot = os.path.dirname(__file__)+"/data/alpha_consistency.txt"
         izs,ialphas = np.loadtxt(aroot,unpack=True) # FIXME: hardcoded
         alpha = interp1d(izs,ialphas,bounds_error=True)(zs)
     return alpha * unnormalized 
 
     
-def simple_f_nu(nu,delta=200.):
+def simple_f_nu(nu, zs, delta=200.):
     assert np.isclose(delta,200.), "delta!=200 note implemented yet." # FIXME: interpolate for any value of delta
     deltac = constants['deltac']
     sigma = deltac/nu
-    A = 0.186
-    a = 1.47
-    b = 2.57
+    logalpha = - (0.75 / np.log(delta/75))**1.2
+    A = 0.186 *(1+zs)**(-0.14)
+    a = 1.47 * (1+zs)**(-0.06)
+    b = 2.57 * (1+zs)**(-1 * np.exp(logalpha))
     c = 1.19
     return A* (1.+((sigma/b)**(-a))) * np.exp(-c/sigma**2.)
 
