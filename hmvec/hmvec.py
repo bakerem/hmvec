@@ -74,13 +74,14 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',engine='camb'):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',engine='camb', concentration_mode='duffy'):
         self.zs = np.asarray(zs)
         self.ks = ks
         Cosmology.__init__(self,params,halofit,accuracy=accuracy,engine=engine)
         
         self.mdef = mdef
         self.mode = mass_function
+        self.concentration_mode = concentration_mode
         self.hods = {}
 
         # Mass function
@@ -103,14 +104,16 @@ class HaloModel(Cosmology):
 
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
-        # return 178. * self.omz(z)**(0.45) # Eke et al 1998
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
+        # return 178. * self.omz(z)**(0.45) # Eke et al 1998
+    
     
     def rvir(self,m,z):
         if self.mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
+            # return R_from_M(m,self.rho_critical_z(z),delta=178.) #using patchy reionization assumption
         elif self.mdef == 'mean':
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
     
@@ -121,7 +124,7 @@ class HaloModel(Cosmology):
     def get_sigma2(self):
         ms = self.ms
         R = self.R_of_m(ms)[None,:,None]
-        return self.get_sigma2_R(R,self.zs)
+        return self.get_sigma2_R(R,self.zs,)
 
     
     def init_mass_function(self,ms):
@@ -142,6 +145,7 @@ class HaloModel(Cosmology):
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
             fnus = tinker.f_nu(nus,self.zs[:,None])
+            # fnus = tinker.simple_f_nu(nus, self.zs[:,None]) #changed this so we have T08 halo mass function
             return nus * fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
@@ -159,10 +163,25 @@ class HaloModel(Cosmology):
             return tinker.bias(nus)
         else:
             raise NotImplementedError
-
-    def concentration(self,mode='duffy'):
+        
+    def bhattacharya(self):
         ms = self.ms
-        if mode=='duffy':
+        zs = self.zs
+        a = 1/(1+zs)
+        h = self.h
+        D = self.D_growth(a, type="anorm", exact=True)[:, None]
+        h = default_params['H0'] / 100. if h is None else h
+        nu = D**-1 * (1.12 * (ms[None, :] *h / 5e13)**0.3 + 0.53)
+        if self.mdef == "mean":
+            return D**0.54 * 5.9 * nu**-0.35
+        if self.mdef == "vir":
+            return D**0.9 * 7.7 * nu**-0.29
+    
+
+    def concentration(self,):
+        ms = self.ms
+        concentration_mode = self.concentration_mode
+        if concentration_mode=='duffy':
             if self.mdef == 'mean':
                 A = self.p['duffy_A_mean']
                 alpha = self.p['duffy_alpha_mean']
@@ -172,7 +191,10 @@ class HaloModel(Cosmology):
                 alpha = self.p['duffy_alpha_vir']
                 beta = self.p['duffy_beta_vir']
             return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
+        elif concentration_mode=='bhattacharya':
+            return self.bhattacharya()
         else:
+            print('error')
             raise NotImplementedError
 
     def get_nzm(self):
@@ -181,8 +203,11 @@ class HaloModel(Cosmology):
         ln_sigma_inv = -0.5*np.log(sigma2)
         fsigmaz = self.get_fsigmaz()
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
+        dln_sigma_inv_dm = np.gradient(ln_sigma_inv,ms,axis=-1)
         ms = ms[None,:]
-        return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
+        # return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
+        return self.rho_matter_z(0) * fsigmaz * dln_sigma_inv_dm / ms 
+
 
     
     def add_battaglia_profile(self,name,family=None,param_override=None,
@@ -736,8 +761,8 @@ def Fcon(c): return (np.log(1.+c) - (c/(1.+c)))
 
 def rhoscale_nfw(mdelta,rdelta,cdelta):
     rs = rdelta/cdelta
-    V = 4.*np.pi * rs**3.
-    return pref * mdelta / V / Fcon(cdelta)
+    V = 4.*np.pi * rs**3. 
+    return mdelta / V / Fcon(cdelta)
 
 def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
@@ -814,6 +839,29 @@ def rho_gas(r,m200critz,z,omb,omm,rhocritz,
                            beta_alpham=battaglia_defaults[profile]['beta_alpham'],
                            beta_alphaz=battaglia_defaults[profile]['beta_alphaz'])
 
+
+
+def drhogas_dr(r, m200critz,z,omb,omm,rhocritz,
+            gamma=default_params['battaglia_gas_gamma'],
+            profile="AGN"):
+    gamma=gamma
+    rho0_A0=battaglia_defaults[profile]['rho0_A0']
+    rho0_alpham=battaglia_defaults[profile]['rho0_alpham']
+    rho0_alphaz=battaglia_defaults[profile]['rho0_alphaz']
+    alpha_A0=battaglia_defaults[profile]['alpha_A0']
+    alpha_alpham=battaglia_defaults[profile]['alpha_alpham']
+    alpha_alphaz=battaglia_defaults[profile]['alpha_alphaz']
+    beta_A0=battaglia_defaults[profile]['beta_A0']
+    beta_alpham=battaglia_defaults[profile]['beta_alpham']
+    beta_alphaz=battaglia_defaults[profile]['beta_alphaz']
+    rho0 = battaglia_gas_fit(m200critz,z,rho0_A0,rho0_alpham,rho0_alphaz)
+    alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
+    beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
+    R200 = R_from_M(m200critz,rhocritz,delta=200)
+    return (2**gamma * rho0 * rhocritz * omb) / (r * omm) * (1 + (2*r/R200)**alpha)**(-(alpha+beta+gamma)/alpha) * (r/R200)**gamma * (-(2*r/R200)**alpha * beta + gamma)
+
+    
+
 def rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
                     gamma=default_params['battaglia_gas_gamma'],
                     rho0_A0=battaglia_defaults[default_params['battaglia_gas_family']]['rho0_A0'],
@@ -830,10 +878,9 @@ def rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
     AGN and SH Battaglia 2016 profiles
     r: physical distance
     m200critz: M200_critical_z
-
     """
     R200 = R_from_M(m200critz,rhocritz,delta=200)
-    x = 2*r/R200
+    x = 2*r/R200 # really x/xc
     return rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,gamma,
                              rho0_A0,rho0_alpham,rho0_alphaz,
                              alpha_A0,alpha_alpham,alpha_alphaz,
@@ -855,7 +902,9 @@ def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
     alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
     beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
     # Note the sign difference in the second gamma. Battaglia 2016 had a typo here.
-    return (omb/omm) * rhocritz * rho0 * (x**gamma) * (1.+x**alpha)**(-(beta+gamma)/alpha)
+    return omb/omm * rhocritz * rho0 * (x**gamma) * (1.+x**alpha)**(-(beta+gamma)/alpha)
+
+
 
 
    
