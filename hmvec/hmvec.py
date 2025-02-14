@@ -104,8 +104,9 @@ class HaloModel(Cosmology):
 
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
-        x = self.omz(z) - 1.
+        x = self.omz(z) + self.oml0 - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
+        d = 178
         return d
         # return 178. * self.omz(z)**(0.45) # Eke et al 1998
     
