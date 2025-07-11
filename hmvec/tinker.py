@@ -67,16 +67,40 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
         alpha = interp1d(izs,ialphas,bounds_error=True)(zs)
     return alpha * unnormalized 
 
+A_array = np.array([1.858659e-01, 1.995973e-01, 2.115659e-01, 2.184113e-01, 2.480968e-01,
+        2.546053e-01, 2.600000e-01, 2.600000e-01, 2.600000e-01])
+a_array = np.array([1.466904, 1.521782, 1.559186, 1.614585, 1.869936,
+        2.128056, 2.301275, 2.529241, 2.661983])
+b_array = np.array([2.571104, 2.254217, 2.048674, 1.869559, 1.588649,
+        1.507134, 1.464374, 1.436827, 1.405210])
+c_array = np.array([1.193958, 1.270316, 1.335191, 1.446266, 1.581345,
+        1.795050, 1.965613, 2.237466, 2.439729])
+delta_virs = np.array([200, 300, 400, 600, 800, 1200, 1600, 2400, 3200])
+
+A_interp = interp1d(delta_virs, A_array,)
+a_interp = interp1d(delta_virs, a_array,)
+b_interp = interp1d(delta_virs, b_array,)
+c_interp = interp1d(delta_virs, c_array,)
     
-def simple_f_nu(nu, zs, delta=200.):
-    assert np.isclose(delta,200.), "delta!=200 note implemented yet." # FIXME: interpolate for any value of delta
+def simple_f_nu(nu, zs, omm):
+    delta = 200#/omm
+    # assert np.isclose(delta,200.), "delta!=200 not implemented yet." # FIXME: interpolate for any value of delta
     deltac = constants['deltac']
     sigma = deltac/nu
-    logalpha = - (0.75 / np.log(delta/75))**1.2
-    A = 0.186 *(1+zs)**(-0.14)
-    a = 1.47 * (1+zs)**(-0.06)
-    b = 2.57 * (1+zs)**(-1 * np.exp(logalpha))
-    c = 1.19
+    if delta == 200:
+        A0 = 0.186
+        a0 = 1.47
+        b0 = 2.57
+        c = 1.19
+    else:
+        A0 = 0.1 * np.log10(delta) - 0.05
+        a0 = 1.43 + (np.log10(delta) - 2.3)**1.5
+        b0 = 1.0 + (np.log10(delta) - 1.6)**-1.5
+        c = 1.2 + (np.log10(delta) - 2.35)**1.6
+    alpha = 10 ** (-((0.75 / np.log10(delta / 75.0)) ** 1.2))
+    A = A0 * (1+zs)**(-0.14)
+    a = a0 * (1+zs)**(-0.06)
+    b = b0 * (1+zs)**(-alpha)
     return A* (1.+((sigma/b)**(-a))) * np.exp(-c/sigma**2.)
 
 

@@ -105,16 +105,16 @@ class HaloModel(Cosmology):
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
         x = self.omz(z) + self.oml0 - 1.
-        d = 18.*np.pi**2. + 82.*x - 39. * x**2.
-        d = 178
+        # d = 18.*np.pi**2. + 82.*x - 39. * x**2.
+        # d = 178. * self.omz(z)**(0.45) # Eke et al 1998
+        d = 178 # usual definition in dark screening papers
+        # d = 200
         return d
-        # return 178. * self.omz(z)**(0.45) # Eke et al 1998
     
     
     def rvir(self,m,z):
         if self.mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
-            # return R_from_M(m,self.rho_critical_z(z),delta=178.) #using patchy reionization assumption
         elif self.mdef == 'mean':
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
     
@@ -145,9 +145,11 @@ class HaloModel(Cosmology):
             return A*np.sqrt(2.*a/np.pi)*(1+((sigma2/a/deltac**2.)**p))*(deltac/sigma)*np.exp(-a*deltac**2./2./sigma2)
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
-            fnus = tinker.f_nu(nus,self.zs[:,None])
-            # fnus = tinker.simple_f_nu(nus, self.zs[:,None]) #changed this so we have T08 halo mass function
-            return nus * fnus # note that f is actually nu*fnu !
+            # fnus = tinker.f_nu(nus,self.zs[:,None])
+            # return nus * fnus # note that f is actually nu*fnu !
+
+            fnus = tinker.simple_f_nu(nus, self.zs[:,None], self.omm0) #changed this so we have T08 halo mass function
+            return fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
     
@@ -165,35 +167,40 @@ class HaloModel(Cosmology):
         else:
             raise NotImplementedError
         
-    def bhattacharya(self):
+    def bhattacharya(self, mdef="vir",):
         ms = self.ms
         zs = self.zs
         a = 1/(1+zs)
         h = self.h
-        D = self.D_growth(a, type="anorm", exact=True)[:, None]
+        D = self.D_growth(a, type="z0norm", exact=True)[:, None]
         h = default_params['H0'] / 100. if h is None else h
-        nu = D**-1 * (1.12 * (ms[None, :] *h / 5e13)**0.3 + 0.53)
-        if self.mdef == "mean":
-            return D**0.54 * 5.9 * nu**-0.35
-        if self.mdef == "vir":
+        nu = D**-1 * (1.12 * (ms[None, :] * h / 5e13)**0.3 + 0.53)
+        # return D**0.54 * 5.9 * nu**-0.35
+        if mdef == "mean":
+            return D**1.15 * 9.0 * nu**-0.29 # full sample Delta=200rho_b
+        if mdef == "vir":
             return D**0.9 * 7.7 * nu**-0.29
-    
+        
+        
+        
 
-    def concentration(self,):
+    def concentration(self, mdef=None,):
         ms = self.ms
         concentration_mode = self.concentration_mode
+        if mdef is None:
+            mdef = self.mdef
         if concentration_mode=='duffy':
-            if self.mdef == 'mean':
+            if mdef == 'mean':
                 A = self.p['duffy_A_mean']
                 alpha = self.p['duffy_alpha_mean']
                 beta = self.p['duffy_beta_mean']
-            elif self.mdef == 'vir':
+            elif mdef == 'vir':
                 A = self.p['duffy_A_vir']
                 alpha = self.p['duffy_alpha_vir']
                 beta = self.p['duffy_beta_vir']
             return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
         elif concentration_mode=='bhattacharya':
-            return self.bhattacharya()
+            return self.bhattacharya(mdef=mdef,)
         else:
             print('error')
             raise NotImplementedError
@@ -206,11 +213,8 @@ class HaloModel(Cosmology):
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
         dln_sigma_inv_dm = np.gradient(ln_sigma_inv,ms,axis=-1)
         ms = ms[None,:]
-        # return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_inv_dm / ms 
 
-
-    
     def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
                               xmax=None,ignore_existing=False):
@@ -372,7 +376,7 @@ class HaloModel(Cosmology):
         else:
             cs = cs[...,None]
             mc = np.log(1+cs)-cs/(1.+cs)
-            x = self.ks[None,None]*rss *(1+self.zs[:,None,None])# !!!!
+            x = self.ks[None,None] *rss *(1+self.zs[:,None,None])# !!!!
             Si, Ci = scipy.special.sici(x)
             Sic, Cic = scipy.special.sici((1.+cs)*x)
             ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
@@ -489,7 +493,6 @@ class HaloModel(Cosmology):
         integrand = self.nzm * (Nc+Ns) * self.bh
         return np.trapz(integrand,self.ms,axis=-1)/ngal
     
-
     def _get_hod_common(self,name):
         hod = self.hods[name]
         cname = hod['central_profile']
@@ -519,7 +522,6 @@ class HaloModel(Cosmology):
         pk = self.pk_profiles[name].copy()
         if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
         return pk
-
 
     def get_power(self,name,name2=None,verbose=False,b1=None,b2=None):
         if name2 is None: name2 = name

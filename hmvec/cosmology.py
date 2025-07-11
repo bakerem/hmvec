@@ -212,7 +212,7 @@ class Cosmology(object):
         self.params = params
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
         self.h = h
-        self.omm0 = omh2 / (self.params['H0']/100.)**2.
+        self.omm0 = omh2 / (self.h)**2.
         self.omk0 = self.params['omk']
         self.oml0 = 1-self.omm0-self.omk0
         try: self.as8 = self.params['as8']        
